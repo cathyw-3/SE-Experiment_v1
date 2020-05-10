@@ -1,1 +1,1 @@
-./example.ast
+./auto_local.ast
