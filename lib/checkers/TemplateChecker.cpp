@@ -1,14 +1,21 @@
 #include "checkers/TemplateChecker.h"
 #include "stack"
+#include "algorithm"
+
+struct Info {
+  int def_line;
+};
 
 void TraverseDecl(Decl *anydecl, int count, SourceManager *scm);
 void TraverseStmt(Stmt * anystmt, int count, SourceManager *scm);
 defuse_node all_node;
-bool definition = true;
-bool integ = true;
+bool definition = false;
+bool integ = false;
+bool callee = false;
 std::map<int, std::map<std::string, int>> def_tmp;
+std::map<std::string, int> global_def;
 std::map<std::string, bool> decl_or_def;
-unsigned block_id;
+int block_id = -1;
 std::vector<int> reverse_path;
 std::stack<CFGBlock *> stack_path;
 std::string varname;
@@ -27,12 +34,17 @@ void TraverseDecl(Decl *anydecl, int count, SourceManager *scm) {
     case 57: //vardecl
       vardecl = (VarDecl *)anydecl;
       line = vardecl->getASTContext().getSourceManager().getSpellingLineNumber(vardecl->getLocation());
+      std::cout << vardecl->getID() << "\n";
       //std::cout << line << std::endl;
       std::cout << vardecl->getQualifiedNameAsString() << " "
         << vardecl->getType().getAsString() << std::endl;
       all_node.add_var(vardecl->getQualifiedNameAsString());
       //add
-      def_tmp[block_id][vardecl->getQualifiedNameAsString()] = line;
+      if (block_id == -1) {
+        global_def[vardecl->getQualifiedNameAsString()] = line;
+      }
+      else
+        def_tmp[block_id][vardecl->getQualifiedNameAsString()] = line;
       decl_or_def[vardecl->getQualifiedNameAsString()] = false;
       //std::cout << count << std::endl;
       if (vardecl->ensureEvaluatedStmt() != nullptr) {
@@ -188,12 +200,14 @@ void TraverseStmt(Stmt * anystmt, int count, SourceManager *scm) {
         std::cout << nullptrltr->getType().getAsString() << std::endl;
         break;
       case 116: //callExpr
+        callee = true;
         ++count;
         callexpr = (CallExpr *)anystmt;
         std::cout << callexpr->getStmtClassName() << ": " << std::endl;
         for (auto i = callexpr->child_begin(); i != callexpr->child_end(); ++i) {
           TraverseStmt(*i, count, scm);
         }
+        callee = false;
         break;
       case 122: //CStyleCastExpr
         ++count;
@@ -223,39 +237,45 @@ void TraverseStmt(Stmt * anystmt, int count, SourceManager *scm) {
         std::cout << dlrefexpr->getType().getAsString() << "  ";
         std::cout << dlrefexpr->getDecl()->getDeclKindName() << "  ";
         std::cout << dlrefexpr->getDecl()->getNameAsString() << std::endl;
+        std::cout << dlrefexpr->getDecl()->getID() << "\n";
         line = scm->getSpellingLineNumber(dlrefexpr->getLocation());
         //std::cout << line << std::endl;
-        if (definition == true) {
-          //update or add def
-          //def_tmp[block_id] = "var+info"
-          def_tmp[block_id][dlrefexpr->getDecl()->getNameAsString()] = line;
-          decl_or_def[dlrefexpr->getDecl()->getNameAsString()] = true;
-          definition = false;
-        }
-        else {
-          //use
-          //def-reverse to last definition
-          //all_node.add_du(var, def_tmp)
-          for (int i = 0; i < reverse_path.size(); ++i) {
-            if (reverse_path[i] == block_id) {
-              pos = i;
-              break;
-            }
-          }
-          if (def_tmp[block_id].find(dlrefexpr->getDecl()->getNameAsString()) != def_tmp[block_id].end()) {
-            all_node.add_du(dlrefexpr->getDecl()->getNameAsString(), def_tmp[block_id][dlrefexpr->getDecl()->getNameAsString()], line);
+        if (strcmp(dlrefexpr->getDecl()->getDeclKindName(), "Function") != 0) {
+          if (definition == true) {
+            //update or add def
+            //def_tmp[block_id] = "var+info"
+            def_tmp[block_id][dlrefexpr->getDecl()->getNameAsString()] = line;
+            decl_or_def[dlrefexpr->getDecl()->getNameAsString()] = true;
+            definition = false;
           }
           else {
-            --pos;
-            //std::cout << pos << std::endl;
-            while (pos >= 0) {
-              if (def_tmp[reverse_path[pos]].find(dlrefexpr->getDecl()->getNameAsString()) != def_tmp[reverse_path[pos]].end()) {
-                all_node.add_du(dlrefexpr->getDecl()->getNameAsString(), def_tmp[reverse_path[pos]][dlrefexpr->getDecl()->getNameAsString()], line);
+            //use
+            //def-reverse to last definition
+            //all_node.add_du(var, def_tmp)
+            for (int i = 0; i < reverse_path.size(); ++i) {
+              if (reverse_path[i] == block_id) {
+                pos = i;
                 break;
               }
-              --pos;
             }
-            //std::cout << pos << std::endl;
+            if (def_tmp[block_id].find(dlrefexpr->getDecl()->getNameAsString()) != def_tmp[block_id].end()) {
+              all_node.add_du(dlrefexpr->getDecl()->getNameAsString(), def_tmp[block_id][dlrefexpr->getDecl()->getNameAsString()], line);
+            }
+            else {
+              --pos;
+              //std::cout << pos << std::endl;
+              while (pos >= 0) {
+                if (def_tmp[reverse_path[pos]].find(dlrefexpr->getDecl()->getNameAsString()) != def_tmp[reverse_path[pos]].end()) {
+                  all_node.add_du(dlrefexpr->getDecl()->getNameAsString(), def_tmp[reverse_path[pos]][dlrefexpr->getDecl()->getNameAsString()], line);
+                  break;
+                }
+                --pos;
+              }
+              //std::cout << pos << std::endl;
+            }
+            if (pos == -1) {
+              all_node.add_du(dlrefexpr->getDecl()->getNameAsString(), global_def[dlrefexpr->getDecl()->getNameAsString()], line);
+            }
           }
         }
         break;
@@ -357,6 +377,7 @@ void TemplateChecker::check() {
       
       std::cout << fd->getQualifiedNameAsString() << " "
         << fd->getType().getAsString() << std::endl;
+
       
       //parameter
       if (fd->getNumParams() > 0) {
@@ -378,24 +399,94 @@ void TemplateChecker::check() {
       LangOptions LangOpts;
       LangOpts.CPlusPlus = true;
       fd_cfg->dump(LangOpts, true);
+      
       auto block = &(fd_cfg->getEntry());
       auto exit = &fd_cfg->getExit();
+      //first
+      CFGBlock *t;
       while(block->getBlockID() != exit->getBlockID()) {
-        block_id = block->getBlockID();
-        reverse_path.push_back(block_id);
-        for (auto I = block->begin(); I != block->end(); ++I) {
-          if (Optional<CFGStmt> CS = (*I).getAs<CFGStmt>()) {
-            Stmt *S = const_cast<Stmt *>(CS->getStmt());
-            assert(S != nullptr && "Expecting non-null Stmt");
-            //std::cout <<"1.\n"<<std::endl;
-            TraverseStmt(S, 0, &fd->getASTContext().getSourceManager());
+        if (std::find(reverse_path.begin(), reverse_path.end(), block->getBlockID()) != reverse_path.end()) {
+          //std::cout << "in.\n";
+          for (auto i = block->succ_begin(); i != block->succ_end(); ++i) {
+            t = i->getReachableBlock();
+          }
+          block = t;
+          //std::cout << block->getBlockID() << "\n";
+        }
+        if (block->getBlockID() != exit->getBlockID()) {
+          stack_path.push(block);
+          block_id = block->getBlockID();
+          reverse_path.push_back(block_id);
+          for (auto I = block->begin(); I != block->end(); ++I) {
+            if (Optional<CFGStmt> CS = (*I).getAs<CFGStmt>()) {
+              Stmt *S = const_cast<Stmt *>(CS->getStmt());
+              assert(S != nullptr && "Expecting non-null Stmt");
+              //std::cout <<"1.\n"<<std::endl;
+              TraverseStmt(S, 0, &fd->getASTContext().getSourceManager());
+            }
+          }
+          block = block->succ_begin()->getReachableBlock();
+        }
+      }
+      
+      //std::cout << "out the first.\n";
+      //next
+      CFGBlock *current;
+      CFGBlock *tmp;
+      CFGBlock *next;
+      while ((stack_path.empty() == false)) {
+        //std::cout << stack_path.top()->succ_size() << "\n";
+        if (stack_path.top()->succ_size() > 1) {
+          tmp = stack_path.top();
+          //find next successor of block tmp
+          for (auto i = tmp->succ_begin(); i != tmp->succ_end(); ++i) {
+            if (i->getReachableBlock()->getBlockID() == current->getBlockID()) {
+              next = (++i)->getReachableBlock();
+              break;
+            }
+          }
+          //if (next->getBlockID() == exit->getBlockID())
+            //break;
+        }
+        //the last child
+        if ((stack_path.top()->succ_size() <= 1) || (next == tmp->succ_end()->getReachableBlock()) || (next->getBlockID() == exit->getBlockID())) {
+          current = stack_path.top();
+          stack_path.pop();
+          reverse_path.pop_back();
+        }
+        else {
+          while(next->getBlockID() != exit->getBlockID()) {
+            //std::cout << reverse_path.size() << "\n";
+            if (std::find(reverse_path.begin(), reverse_path.end(), next->getBlockID()) != reverse_path.end()) {
+              for (auto i = next->succ_begin(); i != next->succ_end(); ++i) {
+                t = i->getReachableBlock();
+              }
+              next = t;
+              //std::cout << next->getBlockID() << "\n";
+            }
+            stack_path.push(next);
+            block_id = next->getBlockID();
+            reverse_path.push_back(block_id);
+            for (auto I = next->begin(); I != next->end(); ++I) {
+              if (Optional<CFGStmt> CS = (*I).getAs<CFGStmt>()) {
+                Stmt *S = const_cast<Stmt *>(CS->getStmt());
+                assert(S != nullptr && "Expecting non-null Stmt");
+                //std::cout <<"1.\n"<<std::endl;
+                TraverseStmt(S, 0, &fd->getASTContext().getSourceManager());
+              }  
+            }
+            next = next->succ_begin()->getReachableBlock();
           }
         }
-        block = block->succ_begin()->getReachableBlock();
       }
+      
+      //std::cout << "out the whole while.\n";
     }
+    
     ++astr_iter;
   }
+
+  
   all_node.output_node();
 
   //analyze
@@ -403,11 +494,10 @@ void TemplateChecker::check() {
     if((*b).second == false) {
       std::cout << "error: ";
       std::cout << "variable" << "'" << (*b).first << "'" << "uninitialized!\n";
-      std::vector<std::pair<int, int>> d = all_node.get_node()[(*b).first].get_du();
+      std::vector<element> d = all_node.get_node()[(*b).first].get_du();
       for (auto b_in = d.begin(); b_in != d.end(); ++b_in) {
-        std::cout << "declaration in line: " << (*b_in).first << " used in line: " << (*b_in).second << "\n";
+        (*b_in).output_element();
       }
     }
   }
-  
 }

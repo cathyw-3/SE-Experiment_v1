@@ -9,6 +9,32 @@
 #include <string>
 #include <utility>
 
+class element {
+public:
+  
+  element() {
+    ;
+  }
+
+  void add_lncol(int def, int use) {
+    std::pair<int, int> pr(def, use);
+    ln_col = pr;
+  }
+
+  std::pair<int, int> get_lncol() {
+    return ln_col;
+  }
+
+  void output_element() {
+    std::cout << ln_col.first << " " << ln_col.second << "\n";
+  }
+ 
+
+private:
+  std::pair<int, int> ln_col;
+
+};
+
 class def_use {
 public:
 
@@ -16,24 +42,40 @@ public:
       ;
   }
 
-  void add(int def, int use) {
-      std::pair<int, int> pr(def, use);
-      du.push_back(pr);
+  void add_lncol(int def, int use) {
+    std::pair<int, int> pr(def, use);
+    if (du.size() > 0) {
+      auto i = du.begin();
+      for (; i != du.end(); ++i) {
+        if (pr == (*i).get_lncol()) {
+          break;
+        }
+      }
+      if (pr != (*i).get_lncol()) {
+        element p;
+        p.add_lncol(def, use);
+        du.push_back(p);
+      }
+    }
+    else {
+      element p;
+      p.add_lncol(def, use);
+      du.push_back(p);
+    }
   }
 
   void output_all() {
     for (int i = 0; i < du.size(); ++i) {
-      std::cout << du[i].first << "  ";
-      std::cout << du[i].second << std::endl;
+      du[i].output_element();
     }
   }
 
-  std::vector<std::pair<int, int>> get_du() {
+  std::vector<element> get_du() {
     return du;
   }
 
 private:
-  std::vector<std::pair<int, int>> du;
+  std::vector<element> du;
   
 };
 
@@ -49,7 +91,7 @@ public:
   }
 
   void add_du(std::string var, int def, int use) {
-    du_node[var].add(def, use);
+    du_node[var].add_lncol(def, use);
   }
 
   void output_node() {
