@@ -1,70 +1,3 @@
-#==============================================================================#
-# File extensions to be ignored anywhere in the tree.
-#==============================================================================#
-# Temp files created by most text editors.
-*~
-# Merge files created by git.
-*.orig
-# Byte compiled python modules.
-*.pyc
-# vim swap files
-.*.swp
-.sw?
-# OS X specific files.
-.DS_store
-._.DS_store
-.DS_Store
-._.DS_Store
-
-# vscode user config file
-.vscode/
-
-# CLion project config file
-.idea
-*.iml
-
-# cmake build
-cmake-build-debug
-
-#==============================================================================#
-# File extensions to be ignored for c++
-#==============================================================================#
-# Prerequisites
-*.d
-
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
-#==============================================================================#
-# File extensions to be ignored for c
-#==============================================================================#
 # Prerequisites
 *.d
 
@@ -117,8 +50,3 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
-<<<<<<< HEAD
-*.ast
-=======
-*.ast
->>>>>>> 9376136ae5a22a6240fbd9077436e51782eb95da
