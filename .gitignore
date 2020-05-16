@@ -117,4 +117,8 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+<<<<<<< HEAD
 *.ast
+=======
+*.ast
+>>>>>>> 9376136ae5a22a6240fbd9077436e51782eb95da
