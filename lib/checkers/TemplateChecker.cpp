@@ -5,6 +5,11 @@
 struct Info {
   std::string varname;
   int def_line;
+  Stmt *def_stmt;
+  //tmp
+  int block_id;
+  int var_id;
+  SourceLocation location;
 };
 
 void TraverseDecl(Decl *anydecl, int count, SourceManager *scm);
@@ -15,6 +20,8 @@ bool integ = false;
 bool callee = false;
 //block_id, varID, Info
 std::map<int, std::map<int, Info>> def_tmp;
+std::vector<Info> assign_tmp;
+bool saved = true;
 std::map<int, Info> global_def;
 std::map<std::string, bool> decl_or_def;
 int block_id = -1;
@@ -23,6 +30,21 @@ std::stack<CFGBlock *> stack_path;
 std::string g_varname;
 std::string cur_funcname;
 int g_id;
+Stmt *cur_stmt;
+//test
+//SourceLocation sl;
+int idx = 0;
+
+void output_deftmp() {
+  //def_tmp
+  for (auto i = def_tmp.begin(); i != def_tmp.end(); ++i) {
+    std::cout << i->first << "\n";
+    for (auto ii = i->second.begin(); ii != i->second.end(); ++ii) {
+      std::cout << ii->first << "  ";
+      std::cout << ii->second.varname << "  " << ii->second.def_line << "\n";
+    }
+  }
+}
 
 
 
@@ -40,36 +62,64 @@ void TraverseDecl(Decl *anydecl, int count, SourceManager *scm) {
       line = vardecl->getASTContext().getSourceManager().getSpellingLineNumber(vardecl->getLocation());
       //std::cout << vardecl->getID() << "\n";
       //std::cout << line << std::endl;
+      /*
+      if (sl == vardecl->getLocation()) {
+        std::cout << "True.\n";
+      }
+      else
+      {
+        std::cout << "False.\n";
+      }
+      sl = vardecl->getLocation();
+      */
       std::cout << vardecl->getQualifiedNameAsString() << " "
         << vardecl->getType().getAsString() << std::endl;
-      all_node.add_var(vardecl->getID(), vardecl->getQualifiedNameAsString());
-      all_node.add_type(vardecl->getID(), vardecl->getType().getAsString());
+      std::cout << vardecl->getLocation().printToString(*scm) << "\n";
+      all_node.add_var(vardecl->getID(), vardecl->getQualifiedNameAsString(), vardecl->getType().getAsString());
+      //all_node.add_du(vardecl->getID(), line, 0, cur_funcname, cur_stmt, nullptr);
       //add
       if (block_id == -1) {
         global_def[vardecl->getID()].def_line = line;
         global_def[vardecl->getID()].varname = vardecl->getQualifiedNameAsString();
+        global_def[vardecl->getID()].def_stmt = cur_stmt;
       }
       else {
         def_tmp[block_id][vardecl->getID()].varname = vardecl->getQualifiedNameAsString();
         def_tmp[block_id][vardecl->getID()].def_line = line;
+        def_tmp[block_id][vardecl->getID()].def_stmt = cur_stmt;
       }
       decl_or_def[vardecl->getQualifiedNameAsString()] = false;
+      //output_deftmp();
       //std::cout << count << std::endl;
       if (vardecl->ensureEvaluatedStmt() != nullptr) {
         ++count;
         if (vardecl->ensureEvaluatedStmt()->Value != nullptr) {
-          if (strcmp(vardecl->ensureEvaluatedStmt()->Value->getStmtClassName(), "IntegerLiteral") == 0
-            || strcmp(vardecl->ensureEvaluatedStmt()->Value->getStmtClassName(), "InitListExpr") == 0) {
-            integ = true;
-            g_varname = vardecl->getQualifiedNameAsString();
-            g_id = vardecl->getID();
-          }
+          //if (strcmp(vardecl->ensureEvaluatedStmt()->Value->getStmtClassName(), "IntegerLiteral") == 0
+            //|| strcmp(vardecl->ensureEvaluatedStmt()->Value->getStmtClassName(), "InitListExpr") == 0) {
+          integ = true;
+          g_varname = vardecl->getQualifiedNameAsString();
+          g_id = vardecl->getID();
+          all_node.add_defuse_ln(g_id, idx, vardecl->getLocation(), line, 0);
+          all_node.add_funcname(g_id, idx, vardecl->getLocation(), cur_funcname);
+          all_node.add_defuse_stmt(g_id, idx, vardecl->getLocation(), cur_stmt, nullptr);
+          all_node.add_blockid(g_id, idx, vardecl->getLocation(), block_id);
+          //}
         }
         else
         {
           integ = false;
+          all_node.add_defuse_ln(vardecl->getID(), idx, vardecl->getLocation(), line, 0);
+          all_node.add_funcname(vardecl->getID(), idx, vardecl->getLocation(), cur_funcname);
+          all_node.add_defuse_stmt(vardecl->getID(), idx, vardecl->getLocation(), cur_stmt, nullptr);
+          all_node.add_blockid(vardecl->getID(), idx, vardecl->getLocation(), block_id);
         }
         TraverseStmt(vardecl->ensureEvaluatedStmt()->Value, count, scm);
+      }
+      else {
+        all_node.add_defuse_ln(vardecl->getID(), idx, vardecl->getLocation(), line, 0);
+        all_node.add_funcname(vardecl->getID(), idx, vardecl->getLocation(), cur_funcname);
+        all_node.add_defuse_stmt(vardecl->getID(), idx, vardecl->getLocation(), cur_stmt, nullptr);
+        all_node.add_blockid(vardecl->getID(), idx, vardecl->getLocation(), block_id);
       }
       break;
     
@@ -109,6 +159,7 @@ void TraverseStmt(Stmt * anystmt, int count, SourceManager *scm) {
     InitListExpr *initlst;
     unsigned line;
     int pos;
+    Info info_tmp;
     for (int k = 0; k < count; ++k)
       printf(" ");
     unsigned stmtclass = anystmt->getStmtClass();
@@ -186,12 +237,29 @@ void TraverseStmt(Stmt * anystmt, int count, SourceManager *scm) {
         bin = (BinaryOperator *)anystmt;
         std::cout << bin->getStmtClassName() << ": ";
         std::cout << bin->getType().getAsString() << "  " << bin->getOpcodeStr().str() << std::endl;
-        for (auto i = bin->child_begin(); i != bin->child_end(); ++i) {
-          if (strcmp((*i)->getStmtClassName(), "DeclRefExpr") == 0)
+        if (bin->getOpcodeStr().str() == "=")
             definition = true;
           else 
             definition = false;
+        for (auto i = bin->child_begin(); i != bin->child_end(); ++i) {
+          
           TraverseStmt(*i, count, scm);
+        }
+        if (!saved) {
+          //add node
+          info_tmp = assign_tmp[assign_tmp.size()-1];
+          assign_tmp.pop_back();
+          def_tmp[info_tmp.block_id][info_tmp.var_id].def_line = info_tmp.def_line;
+          def_tmp[info_tmp.block_id][info_tmp.var_id].varname = info_tmp.varname;
+          def_tmp[info_tmp.block_id][info_tmp.var_id].def_stmt = info_tmp.def_stmt;
+
+          //all_node.add_du(dlrefexpr->getDecl()->getID(), line, 0, cur_funcname, cur_stmt, nullptr);
+          all_node.add_defuse_ln(info_tmp.var_id, idx, info_tmp.location, info_tmp.def_line, 0);
+          all_node.add_funcname(info_tmp.var_id, idx, info_tmp.location, cur_funcname);
+          all_node.add_defuse_stmt(info_tmp.var_id, idx, info_tmp.location, info_tmp.def_stmt, nullptr);
+          all_node.add_blockid(info_tmp.var_id, idx, info_tmp.location, info_tmp.block_id);
+
+          saved = true;
         }
         break;
       case 97: //CXXConstructExpr
@@ -248,49 +316,94 @@ void TraverseStmt(Stmt * anystmt, int count, SourceManager *scm) {
         std::cout << dlrefexpr->getType().getAsString() << "  ";
         std::cout << dlrefexpr->getDecl()->getDeclKindName() << "  ";
         std::cout << dlrefexpr->getDecl()->getNameAsString() << std::endl;
-        //std::cout << dlrefexpr->getDecl()->getID() << "\n";
+        std::cout << dlrefexpr->getLocation().printToString(*scm) << "\n";
         line = scm->getSpellingLineNumber(dlrefexpr->getLocation());
         //std::cout << line << std::endl;
         if (strcmp(dlrefexpr->getDecl()->getDeclKindName(), "Function") != 0) {
           if (definition == true) {
+            //std::cout << "definition == true" << "\n";
+            //output_deftmp();
             //update or add def
             //def_tmp[block_id] = "var+info"
-            def_tmp[block_id][dlrefexpr->getDecl()->getID()].def_line = line;
-            def_tmp[block_id][dlrefexpr->getDecl()->getID()].varname = dlrefexpr->getDecl()->getNameAsString();
+            //def_tmp[block_id][dlrefexpr->getDecl()->getID()].def_line = line;
+            //def_tmp[block_id][dlrefexpr->getDecl()->getID()].varname = dlrefexpr->getDecl()->getNameAsString();
+            //def_tmp[block_id][dlrefexpr->getDecl()->getID()].def_stmt = cur_stmt;
             decl_or_def[dlrefexpr->getDecl()->getNameAsString()] = true;
+            info_tmp.block_id = block_id;
+            info_tmp.def_line = line;
+            info_tmp.def_stmt = cur_stmt;
+            info_tmp.var_id = dlrefexpr->getDecl()->getID();
+            info_tmp.varname = dlrefexpr->getDecl()->getNameAsString();
+            info_tmp.location = dlrefexpr->getLocation();
+            assign_tmp.push_back(info_tmp);
+            saved = false;
+            //std::cout << line << std::endl;
+            //all_node.add_du(dlrefexpr->getDecl()->getID(), line, 0, cur_funcname, cur_stmt, nullptr);
+            //all_node.add_defuse_ln(dlrefexpr->getDecl()->getID(), idx, dlrefexpr->getLocation(), line, 0);
+            //all_node.add_funcname(dlrefexpr->getDecl()->getID(), idx, dlrefexpr->getLocation(), cur_funcname);
+            //all_node.add_defuse_stmt(dlrefexpr->getDecl()->getID(), idx, dlrefexpr->getLocation(), cur_stmt, nullptr);
+            //all_node.add_blockid(dlrefexpr->getDecl()->getID(), idx, dlrefexpr->getLocation(), block_id);
             definition = false;
+            //output_deftmp();
           }
           else {
             //use
             //def-reverse to last definition
             //all_node.add_du(var, def_tmp)
-            for (int i = 0; i < reverse_path.size(); ++i) {
+            //std::cout << "definition == false" << "\n";
+            //output_deftmp();
+            for (int i = reverse_path.size(); i >= 0; --i) {
               if (reverse_path[i] == block_id) {
                 pos = i;
                 break;
               }
             }
+            //std::cout << "afetr for: " << "\n";
+            //output_deftmp();
             if (def_tmp[block_id].find(dlrefexpr->getDecl()->getID()) != def_tmp[block_id].end()) {
-              all_node.add_du(dlrefexpr->getDecl()->getID(), def_tmp[block_id][dlrefexpr->getDecl()->getID()].def_line, line, 
-                cur_funcname);
+              //std::cout << block_id << std::endl;
+              //std::cout << def_tmp[block_id][dlrefexpr->getDecl()->getID()].def_line << std::endl;
+              //all_node.add_du(dlrefexpr->getDecl()->getID(), def_tmp[block_id][dlrefexpr->getDecl()->getID()].def_line, line, 
+                //cur_funcname, def_tmp[block_id][dlrefexpr->getDecl()->getID()].def_stmt, cur_stmt);
+              all_node.add_defuse_ln(dlrefexpr->getDecl()->getID(), idx, dlrefexpr->getLocation(), def_tmp[block_id][dlrefexpr->getDecl()->getID()].def_line, line);
+              all_node.add_funcname(dlrefexpr->getDecl()->getID(), idx, dlrefexpr->getLocation(), cur_funcname);
+              all_node.add_defuse_stmt(dlrefexpr->getDecl()->getID(), idx, dlrefexpr->getLocation(), def_tmp[block_id][dlrefexpr->getDecl()->getID()].def_stmt, cur_stmt);
+              all_node.add_blockid(dlrefexpr->getDecl()->getID(), idx, dlrefexpr->getLocation(), block_id);
             }
             else {
               --pos;
               //std::cout << pos << std::endl;
               while (pos >= 0) {
                 if (def_tmp[reverse_path[pos]].find(dlrefexpr->getDecl()->getID()) != def_tmp[reverse_path[pos]].end()) {
-                  all_node.add_du(dlrefexpr->getDecl()->getID(), def_tmp[reverse_path[pos]][dlrefexpr->getDecl()->getID()].def_line, line, 
-                    cur_funcname);
+                  //std::cout << pos << std::endl;
+                  //std::cout << reverse_path[pos] << std::endl;
+                  //std::cout << "varname: " << def_tmp[reverse_path[pos]][dlrefexpr->getDecl()->getID()].varname << std::endl;
+                  //std::cout << def_tmp[reverse_path[pos]][dlrefexpr->getDecl()->getID()].def_line << std::endl;
+                  //all_node.add_du(dlrefexpr->getDecl()->getID(), def_tmp[reverse_path[pos]][dlrefexpr->getDecl()->getID()].def_line, line, 
+                    //cur_funcname, def_tmp[reverse_path[pos]][dlrefexpr->getDecl()->getID()].def_stmt, cur_stmt);
+                  all_node.add_defuse_ln(dlrefexpr->getDecl()->getID(), idx, dlrefexpr->getLocation(), def_tmp[reverse_path[pos]][dlrefexpr->getDecl()->getID()].def_line, line);
+                  all_node.add_funcname(dlrefexpr->getDecl()->getID(), idx, dlrefexpr->getLocation(), cur_funcname);
+                  all_node.add_defuse_stmt(dlrefexpr->getDecl()->getID(), idx, dlrefexpr->getLocation(), def_tmp[reverse_path[pos]][dlrefexpr->getDecl()->getID()].def_stmt, cur_stmt);
+                  all_node.add_blockid(dlrefexpr->getDecl()->getID(), idx, dlrefexpr->getLocation(), block_id);
                   break;
                 }
                 --pos;
               }
               //std::cout << pos << std::endl;
             }
+            //std::cout << "after if-else: \n";
+            //output_deftmp();
             if (pos == -1) {
-              all_node.add_du(dlrefexpr->getDecl()->getID(), global_def[dlrefexpr->getDecl()->getID()].def_line, line, 
-                cur_funcname);
+              //std::cout << global_def[dlrefexpr->getDecl()->getID()].def_line << std::endl;
+              //all_node.add_du(dlrefexpr->getDecl()->getID(), global_def[dlrefexpr->getDecl()->getID()].def_line, line, 
+                //cur_funcname, global_def[dlrefexpr->getDecl()->getID()].def_stmt, cur_stmt);
+              all_node.add_defuse_ln(dlrefexpr->getDecl()->getID(), idx, dlrefexpr->getLocation(), global_def[dlrefexpr->getDecl()->getID()].def_line, line);
+              all_node.add_funcname(dlrefexpr->getDecl()->getID(), idx, dlrefexpr->getLocation(), cur_funcname);
+              all_node.add_defuse_stmt(dlrefexpr->getDecl()->getID(), idx, dlrefexpr->getLocation(), global_def[dlrefexpr->getDecl()->getID()].def_stmt, cur_stmt);
+              all_node.add_blockid(dlrefexpr->getDecl()->getID(), idx, dlrefexpr->getLocation(), block_id);
             }
+            //std::cout << "after pos == -1\n";
+            //output_deftmp();
           }
         }
         break;
@@ -315,7 +428,7 @@ void TraverseStmt(Stmt * anystmt, int count, SourceManager *scm) {
         std::cout << gnu->getStmtClassName() << ": ";
         std::cout << gnu->getType().getAsString() << std::endl;
         break;
-      case 152:
+      case 152: //InitLitExpr
         initlst = (InitListExpr *)anystmt;
         std::cout << initlst->getStmtClassName() << ": ";
         std::cout << initlst->getType().getAsString() << "\n";
@@ -327,7 +440,14 @@ void TraverseStmt(Stmt * anystmt, int count, SourceManager *scm) {
           //std::cout << block_id << varname << std::endl;
           def_tmp[block_id][g_id].def_line = scm->getSpellingLineNumber(intltr->getLocation());
           def_tmp[block_id][g_id].varname = g_varname;
+          def_tmp[block_id][g_id].def_stmt = cur_stmt;
           decl_or_def[g_varname] = true;
+          //all_node.add_du(g_id, def_tmp[block_id][g_id].def_line, 0, cur_funcname, cur_stmt, nullptr);
+          std::cout << initlst->getExprLoc().printToString(*scm) << "\n";
+          all_node.add_defuse_ln(g_id, idx, initlst->getExprLoc(), def_tmp[block_id][g_id].def_line, 0);
+          all_node.add_funcname(g_id, idx, initlst->getExprLoc(), cur_funcname);
+          all_node.add_defuse_stmt(g_id, idx, initlst->getExprLoc(), cur_stmt, nullptr);
+          all_node.add_blockid(g_id, idx, initlst->getExprLoc(), block_id);
           integ = false;
         }
         break;
@@ -341,8 +461,15 @@ void TraverseStmt(Stmt * anystmt, int count, SourceManager *scm) {
           //std::cout << block_id << varname << std::endl;
           def_tmp[block_id][g_id].def_line = scm->getSpellingLineNumber(intltr->getLocation());
           def_tmp[block_id][g_id].varname = g_varname;
+          def_tmp[block_id][g_id].def_stmt = cur_stmt;
           decl_or_def[g_varname] = true;
+          //all_node.add_du(g_id, def_tmp[block_id][g_id].def_line, 0, cur_funcname, cur_stmt, nullptr);
+          //all_node.add_defuse_ln(g_id, idx, intltr->getLocation(), def_tmp[block_id][g_id].def_line, 0);
+          //all_node.add_funcname(g_id, idx, intltr->getLocation(), cur_funcname);
+          //all_node.add_defuse_stmt(g_id, idx, intltr->getLocation(), cur_stmt, nullptr);
+          //all_node.add_blockid(g_id, idx, intltr->getLocation(), block_id);
           integ = false;
+          //output_deftmp();
         }
         break;
       case 158: //MemberExpr
@@ -438,6 +565,7 @@ void TemplateChecker::check() {
       auto exit = &fd_cfg->getExit();
       //first
       CFGBlock *t;
+      idx = 1;
       while(block->getBlockID() != exit->getBlockID()) {
         if (std::find(reverse_path.begin(), reverse_path.end(), block->getBlockID()) != reverse_path.end()) {
           //std::cout << "in.\n";
@@ -456,6 +584,8 @@ void TemplateChecker::check() {
               Stmt *S = const_cast<Stmt *>(CS->getStmt());
               assert(S != nullptr && "Expecting non-null Stmt");
               //std::cout <<"1.\n"<<std::endl;
+              cur_stmt = S;
+              //cur_stmt->getBeginLoc().printToString(fd->getASTContext().getSourceManager());
               TraverseStmt(S, 0, &fd->getASTContext().getSourceManager());
             }
           }
@@ -489,6 +619,37 @@ void TemplateChecker::check() {
           reverse_path.pop_back();
         }
         else {
+          ++idx;
+          //add path
+          std::vector<int> all_id;
+          std::map<int, def_use> e = all_node.get_node();
+          for (auto i = e.begin(); i != e.end(); ++i)
+            all_id.push_back((*i).first);
+          for (auto b = ++(reverse_path.begin()); b != reverse_path.end(); ++b) {
+            int bk = (*b);
+            //std::cout << bk << "\n";
+            //output_deftmp();
+            for (auto m = all_id.begin(); m != all_id.end(); ++m) {
+              int id = (*m);
+              //std::cout << id << "\n";
+              std::map<std::pair<int, SourceLocation>, element> n = all_node.get_defuse(id).get_du();
+              for (auto f = n.begin(); f != n.end(); ++f) {
+                element e = (*f).second;
+                //std::cout << e.get_blockid() << "\n";
+                if (((*f).first.first == 1) && (e.get_blockid() == bk)) {
+                  //std::cout << "in if.\n";
+                  SourceLocation sl = (*f).first.second;
+                  //std::cout << e.get_defuse_ln().first << " " << e.get_defuse_ln().second << "\n";
+                  //sl.printToString(fd->getASTContext().getSourceManager());
+                  all_node.add_defuse_ln(id, idx, sl, e.get_defuse_ln().first, e.get_defuse_ln().second);
+                  all_node.add_funcname(id, idx, sl, e.get_funcname());
+                  all_node.add_defuse_stmt(id, idx, sl, e.get_defuse_stmt().first, e.get_defuse_stmt().second);
+                  all_node.add_blockid(id, idx, sl, bk);
+                }
+              }
+            }
+          }
+          
           while(next->getBlockID() != exit->getBlockID()) {
             //std::cout << reverse_path.size() << "\n";
             if (std::find(reverse_path.begin(), reverse_path.end(), next->getBlockID()) != reverse_path.end()) {
@@ -506,6 +667,7 @@ void TemplateChecker::check() {
                 Stmt *S = const_cast<Stmt *>(CS->getStmt());
                 assert(S != nullptr && "Expecting non-null Stmt");
                 //std::cout <<"1.\n"<<std::endl;
+                cur_stmt = S;
                 TraverseStmt(S, 0, &fd->getASTContext().getSourceManager());
               }  
             }
@@ -513,7 +675,7 @@ void TemplateChecker::check() {
           }
         }
       }
-      
+      all_node.output_node(&fd->getASTContext().getSourceManager());
       //std::cout << "out the whole while.\n";
     }
     
@@ -521,7 +683,7 @@ void TemplateChecker::check() {
   }
 
   
-  all_node.output_node();
+  
 
   //global
   for (auto i = global_def.begin(); i != global_def.end(); ++i) {
@@ -529,6 +691,8 @@ void TemplateChecker::check() {
     std::cout << (*i).second.def_line << "  ";
     std::cout << (*i).second.varname << "\n";
   }
+
+  
 
   //analyze
   /*
