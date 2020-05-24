@@ -1,4 +1,5 @@
 #include "checkers/TemplateChecker.h"
+//#include "checkers/All_Detector.h"
 #include "stack"
 #include "algorithm"
 
@@ -11,6 +12,8 @@ struct Info {
   int var_id;
   SourceLocation location;
 };
+
+extern std::map<int, std::vector<CFGBlock *>> path_tree;
 
 void TraverseDecl(Decl *anydecl, int count, SourceManager *scm);
 void TraverseStmt(Stmt * anystmt, int count, SourceManager *scm);
@@ -29,11 +32,14 @@ std::vector<int> reverse_path;
 std::stack<CFGBlock *> stack_path;
 std::string g_varname;
 std::string cur_funcname;
+//Detector detec;
 int g_id;
 Stmt *cur_stmt;
 //test
 //SourceLocation sl;
 int idx = 0;
+
+
 
 void output_deftmp() {
   //def_tmp
@@ -44,6 +50,16 @@ void output_deftmp() {
       std::cout << ii->second.varname << "  " << ii->second.def_line << "\n";
     }
   }
+}
+
+void output_tree() {
+    for (auto i = path_tree.begin(); i != path_tree.end(); ++i) {
+        std::cout << "index " << (*i).first << ":  ";
+        for (auto i_in = (*i).second.begin(); i_in != (*i).second.end(); ++i_in) {
+            std::cout << (*i_in)->getBlockID() << " ";
+        }
+        std::cout << "\n";
+    }
 }
 
 
@@ -567,6 +583,7 @@ void TemplateChecker::check() {
       CFGBlock *t;
       idx = 1;
       while(block->getBlockID() != exit->getBlockID()) {
+        //handle loop
         if (std::find(reverse_path.begin(), reverse_path.end(), block->getBlockID()) != reverse_path.end()) {
           //std::cout << "in.\n";
           for (auto i = block->succ_begin(); i != block->succ_end(); ++i) {
@@ -577,6 +594,7 @@ void TemplateChecker::check() {
         }
         if (block->getBlockID() != exit->getBlockID()) {
           stack_path.push(block);
+          path_tree[idx].push_back(block);
           block_id = block->getBlockID();
           reverse_path.push_back(block_id);
           for (auto I = block->begin(); I != block->end(); ++I) {
@@ -625,8 +643,13 @@ void TemplateChecker::check() {
           std::map<int, def_use> e = all_node.get_node();
           for (auto i = e.begin(); i != e.end(); ++i)
             all_id.push_back((*i).first);
+          //join entry
+          path_tree[idx].push_back(path_tree[1][0]);
+          int path_idx = 1;
           for (auto b = ++(reverse_path.begin()); b != reverse_path.end(); ++b) {
             int bk = (*b);
+            path_tree[idx].push_back(path_tree[idx-1][path_idx]);
+            ++path_idx;
             //std::cout << bk << "\n";
             //output_deftmp();
             for (auto m = all_id.begin(); m != all_id.end(); ++m) {
@@ -660,6 +683,7 @@ void TemplateChecker::check() {
               //std::cout << next->getBlockID() << "\n";
             }
             stack_path.push(next);
+            path_tree[idx].push_back(next);
             block_id = next->getBlockID();
             reverse_path.push_back(block_id);
             for (auto I = next->begin(); I != next->end(); ++I) {
@@ -683,7 +707,7 @@ void TemplateChecker::check() {
   }
 
   
-  
+  output_tree();
 
   //global
   for (auto i = global_def.begin(); i != global_def.end(); ++i) {
@@ -693,6 +717,7 @@ void TemplateChecker::check() {
   }
 
   
+  //detec.detector(path_tree);
 
   //analyze
   /*
