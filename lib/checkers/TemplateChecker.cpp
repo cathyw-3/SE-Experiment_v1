@@ -13,7 +13,8 @@ struct Info {
   SourceLocation location;
 };
 
-extern std::map<int, std::vector<CFGBlock *>> path_tree;
+extern std::map<FunctionDecl *, std::map<int, std::vector<CFGBlock *>>> path_tree;
+extern std::map<FunctionDecl *, std::unique_ptr<clang::CFG>> cfg_path;
 
 void TraverseDecl(Decl *anydecl, int count, SourceManager *scm);
 void TraverseStmt(Stmt * anystmt, int count, SourceManager *scm);
@@ -32,6 +33,7 @@ std::vector<int> reverse_path;
 std::stack<CFGBlock *> stack_path;
 std::string g_varname;
 std::string cur_funcname;
+FunctionDecl *cur_fd;
 //Detector detec;
 int g_id;
 Stmt *cur_stmt;
@@ -54,15 +56,34 @@ void output_deftmp() {
 
 void output_tree() {
     for (auto i = path_tree.begin(); i != path_tree.end(); ++i) {
-        std::cout << "index " << (*i).first << ":  ";
+        std::cout << "FunctionName:  " << (*i).first->getQualifiedNameAsString() << ":  ";
         for (auto i_in = (*i).second.begin(); i_in != (*i).second.end(); ++i_in) {
-            std::cout << (*i_in)->getBlockID() << " ";
+          std::cout << "index: " << (*i_in).first << "\n";
+          //for (auto bk = (*i_in).second.begin(); bk != (*i_in).second.end(); ++bk) {
+            //std::cout << (*bk) << " ";
+            
+          //}
         }
         std::cout << "\n";
     }
 }
 
-
+CFGBlock *convert(CFGBlock& cfg_bk, BumpVectorContext& bv, CFG *p) {
+  CFGBlock *bk = new CFGBlock(cfg_bk.getBlockID(), bv, p);
+  for (auto i = cfg_bk.begin(); i != cfg_bk.end(); ++i) {
+    if (Optional<CFGStmt> CS = (*i).getAs<CFGStmt>()) {
+      Stmt *S = const_cast<Stmt *>(CS->getStmt());
+      assert(S != nullptr && "Expecting non-null Stmt");
+      bk->appendStmt(S, bv);
+    }
+  }
+  std::cout << "size: " << bk->size() << "\n";
+  bk->setHasNoReturnElement();
+  bk->setLabel(cfg_bk.getLabel());
+  bk->setLoopTarget(cfg_bk.getLoopTarget());
+  bk->setTerminator(cfg_bk.getTerminator());
+  return bk;
+}
 
 void TraverseDecl(Decl *anydecl, int count, SourceManager *scm) {
   if (anydecl != nullptr) {
@@ -546,14 +567,21 @@ void TemplateChecker::check() {
     auto fds = astr_iter->second.GetFunctionDecls();
 
     for (auto fd : fds) {
-      printf("FunctionDecl: ");
+      //output_tree();
+      printf("FunctionDecl: \n");
       //std::cout << common::getFullName(fd) << std::endl;
       //fd->dump();
-      auto fd_cfg = common::buildCFG(fd);
-      
+      //output_tree();
+      //auto fd_cfg = common::buildCFG(fd);
+      cfg_path[fd] = common::buildCFG(fd);
+      //output_tree();
       std::cout << fd->getQualifiedNameAsString() << " "
         << fd->getType().getAsString() << std::endl;
       cur_funcname = fd->getQualifiedNameAsString();
+      //output_tree();
+      cur_fd = fd;
+
+    
 
       
       //parameter
@@ -573,15 +601,17 @@ void TemplateChecker::check() {
       //printf("\n");
 
       // Traverse CFG
+      //output_tree();
       LangOptions LangOpts;
       LangOpts.CPlusPlus = true;
-      fd_cfg->dump(LangOpts, true);
+      cfg_path[fd]->dump(LangOpts, true);
       
-      auto block = &(fd_cfg->getEntry());
-      auto exit = &fd_cfg->getExit();
+      auto block = &(cfg_path[fd]->getEntry());
+      auto exit = &cfg_path[fd]->getExit();
       //first
       CFGBlock *t;
       idx = 1;
+      
       while(block->getBlockID() != exit->getBlockID()) {
         //handle loop
         if (std::find(reverse_path.begin(), reverse_path.end(), block->getBlockID()) != reverse_path.end()) {
@@ -594,8 +624,9 @@ void TemplateChecker::check() {
         }
         if (block->getBlockID() != exit->getBlockID()) {
           stack_path.push(block);
-          path_tree[idx].push_back(block);
           block_id = block->getBlockID();
+          //CFGBlock *cb = convert(*block, fd_cfg->getBumpVectorContext(), block->getParent());
+          path_tree[cur_fd][idx].push_back(block);
           reverse_path.push_back(block_id);
           for (auto I = block->begin(); I != block->end(); ++I) {
             if (Optional<CFGStmt> CS = (*I).getAs<CFGStmt>()) {
@@ -610,6 +641,8 @@ void TemplateChecker::check() {
           block = block->succ_begin()->getReachableBlock();
         }
       }
+
+      //output_tree();
       
       //std::cout << "out the first.\n";
       //next
@@ -644,11 +677,11 @@ void TemplateChecker::check() {
           for (auto i = e.begin(); i != e.end(); ++i)
             all_id.push_back((*i).first);
           //join entry
-          path_tree[idx].push_back(path_tree[1][0]);
+          path_tree[cur_fd][idx].push_back(path_tree[cur_fd][1][0]);
           int path_idx = 1;
           for (auto b = ++(reverse_path.begin()); b != reverse_path.end(); ++b) {
             int bk = (*b);
-            path_tree[idx].push_back(path_tree[idx-1][path_idx]);
+            path_tree[cur_fd][idx].push_back(path_tree[cur_fd][idx-1][path_idx]);
             ++path_idx;
             //std::cout << bk << "\n";
             //output_deftmp();
@@ -683,7 +716,8 @@ void TemplateChecker::check() {
               //std::cout << next->getBlockID() << "\n";
             }
             stack_path.push(next);
-            path_tree[idx].push_back(next);
+            //CFGBlock *cb_1 = convert(*next, fd_cfg->getBumpVectorContext(), next->getParent());
+            path_tree[cur_fd][idx].push_back(next);
             block_id = next->getBlockID();
             reverse_path.push_back(block_id);
             for (auto I = next->begin(); I != next->end(); ++I) {
@@ -699,15 +733,18 @@ void TemplateChecker::check() {
           }
         }
       }
+      //output_tree();
       all_node.output_node(&fd->getASTContext().getSourceManager());
       //std::cout << "out the whole while.\n";
+      //output_tree();
     }
+    
     
     ++astr_iter;
   }
 
   
-  output_tree();
+  //output_tree();
 
   //global
   for (auto i = global_def.begin(); i != global_def.end(); ++i) {
