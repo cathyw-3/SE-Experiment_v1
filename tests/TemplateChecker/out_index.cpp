@@ -5,8 +5,11 @@ using namespace std;
 
 void mem_leak1(int n) {
   new int;
-  int *p;
-  int *q = (int *)malloc(sizeof(int)*n);
+  int *p = NULL;
+  if (p != NULL) {
+    p = new int;
+    int *q = (int *)malloc(sizeof(int)*n);
+  }
 }
 
 

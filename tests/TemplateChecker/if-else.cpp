@@ -15,5 +15,8 @@ int main() {
         c = a + b;
     }
     printf("%d\n", c);
-    return 0;
+    for (int i = 0; i < 3; ++i) {
+        ++c;
+    }
+    //return 0;
 }
